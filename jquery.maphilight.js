@@ -1,6 +1,7 @@
 (function($) {
 	var has_VML, has_canvas, create_canvas_for, add_shape_to, clear_canvas, shape_from_area,
-		canvas_style, hex_to_decimal, css3color, is_image_loaded, options_from_area;
+		canvas_style, hex_to_decimal, css3color, is_image_loaded, options_from_area,
+		copy_style;
 
 	has_canvas = !!document.createElement('canvas').getContext;
 
@@ -26,7 +27,7 @@
 			return 'rgba('+hex_to_decimal(color.substr(0,2))+','+hex_to_decimal(color.substr(2,2))+','+hex_to_decimal(color.substr(4,2))+','+opacity+')';
 		};
 		create_canvas_for = function(img) {
-			var c = $('<canvas style="width:'+(img.width-1)+'px;height:'+(img.height-1)+'px;"></canvas>').get(0);
+			var c = $('<canvas style="width:'+(img.width-1)+'px;height:'+(img.height-1)+'px;" class="maphilightcanvas"></canvas>').get(0);
 			c.height = img.height-1;
 			c.width = img.width-1;
 			c.getContext("2d").clearRect(0, 0, c.width, c.height);
@@ -140,7 +141,7 @@
 		};
 	} else {   // ie executes this code
 		create_canvas_for = function(img) {
-			return $('<var style="zoom:1;overflow:hidden;display:block;width:'+(img.width-1)+'px;height:'+(img.height-1)+'px;"></var>').get(0);
+			return $('<var style="zoom:1;overflow:hidden;display:block;width:'+(img.width-1)+'px;height:'+(img.height-1)+'px;" class="maphilightcanvas"></var>').get(0);
 		};
 		add_shape_to = function(canvas, shape, coords, options, name) {
 			var fill, stroke, opacity, e;
@@ -185,10 +186,26 @@
 
 	canvas_style = {
 		position: 'absolute',
-		left: 0,
-		top: 0,
-		padding: 0,
-		border: 0
+	};
+	
+	copy_style = function(target, img, targetOnTop, wrapClass) {
+		var index, value,
+		csstocopy = ["position", "display"];
+		target = $(target);
+		if(wrapClass) {
+			target.addClass(wrapClass === true ? img.attr('class') : wrapClass);
+		}		
+		if(targetOnTop) {
+			target.zIndex(img.zIndex() + 1);
+			target.css("border-color", "transparent");
+		}
+		target.css("pointer-events", "none");			
+		for (index = 0; index < csstocopy.length; ++index) {
+			value = img.css(csstocopy[index]);
+			if(value!==undefined) {
+				target.css(csstocopy[index], value);				
+			}
+		}		
 	};
 	
 	var ie_hax_done = false;
@@ -210,17 +227,18 @@
 		}
 		
 		return this.each(function() {
-			var img, wrap, options, map, canvas, canvas_always, mouseover, highlighted_shape, usemap;
-			img = $(this);
+			var imgElement, img, options, map, usemap, setup_canvas, remove_canvas;
+			imgElement = this;
+			img = $(imgElement);
 
-			if(!is_image_loaded(this)) {
+			options = $.extend({}, opts, $.metadata ? img.metadata() : false, img.data('maphilight'));
+
+			if(!options.setupHilightEvent && !is_image_loaded(imgElement)) {
 				// If the image isn't fully loaded, this won't work right.  Try again later.
 				return window.setTimeout(function() {
 					img.maphilight(opts);
 				}, 200);
 			}
-
-			options = $.extend({}, opts, $.metadata ? img.metadata() : false, img.data('maphilight'));
 
 			// jQuery bug with Opera, results in full-url#usemap being returned from jQuery's attr.
 			// So use raw getAttribute instead.
@@ -236,55 +254,87 @@
 				return;
 			}
 
-			if(img.hasClass('maphilighted')) {
-				// We're redrawing an old map, probably to pick up changes to the options.
-				// Just clear out all the old stuff.
-				var wrapper = img.parent();
-				img.insertBefore(wrapper);
-				wrapper.remove();
-				$(map).unbind('.maphilight').find('area[coords]').unbind('.maphilight');
-			}
-
-			wrap = $('<div></div>').css({
-				display:'block',
-				background:'url("'+this.src+'")',
-				backgroundSize: this.width + 'px ' + this.height + 'px',
-				position:'relative',
-				padding:0,
-				width:this.width,
-				height:this.height
-				});
-			if(options.wrapClass) {
-				if(options.wrapClass === true) {
-					wrap.addClass($(this).attr('class'));
-				} else {
-					wrap.addClass(options.wrapClass);
-				}
-			}
-			img.before(wrap).css('opacity', 0).css(canvas_style).remove();
-			if(has_VML) { img.css('filter', 'Alpha(opacity=0)'); }
-			wrap.append(img);
-			
-			canvas = create_canvas_for(this);
-			$(canvas).css(canvas_style);
-			
-			mouseover = function(e) {
-				var shape, area_options, context;
-				area_options = options_from_area(this, options);
-				if(
-					!area_options.neverOn
-					&&
-					!area_options.alwaysOn
-				) {
-					shape = shape_from_area(this);
-					context = add_shape_to(canvas, shape[0], shape[1], area_options, "highlighted");
-					if (options.callback) {
-						options.callback(this, shape, context);
+			remove_canvas = function() {
+				if(img.hasClass('maphilighted')) {
+					img.removeClass('maphilighted');
+					// We're redrawing an old map, probably to pick up changes to the options.
+					// Just clear out all the old stuff.
+					if(options.useWrapper) {
+						var wrapper = img.parent();
+						img.insertBefore(wrapper);
+						wrapper.remove();					
+					} else {
+						img.prevAll(".maphilightcanvas").remove();
 					}
-					if(area_options.groupBy) {
-						// accept either a string or an array so that multiple attributes can be used
-						(typeof area_options.groupBy == 'string') && (area_options.groupBy = [area_options.groupBy]);
-						var el = $(this); // avoid scoping problem
+					var data = img.data('maphilight_original_style');
+					if (data) {
+						img.attr("style", data);
+						img.data('maphilight_original_style', undefined);						
+					}
+					
+					$(map).off('.maphilight').find('area[coords]').off('.maphilight');
+					if(options.setupHilightEvent) {
+						// readd the setup handler
+						$(map).on(options.setupHilightEvent + '.maphilight', setup_canvas);
+					}
+				}
+			};
+
+			setup_canvas = function() {
+				var wrap, canvas, canvas_always, mouseover;
+
+				if(!is_image_loaded(imgElement)) {
+					// If the image isn't fully loaded, this won't work right.  Try again later.
+					return window.setTimeout(function() {
+						setup_canvas();
+					}, 200);
+				}
+
+				//alert("setup_canvas");
+				remove_canvas();
+
+				canvas = create_canvas_for(imgElement);
+				$(canvas).css(canvas_style);
+
+				img.data("maphilight_original_style", img.attr("style"));
+				if(options.useWrapper) {
+					wrap = $('<div></div>').css({
+						background:'url("'+imgElement.src+'")',
+						backgroundSize: imgElement.width + 'px ' + imgElement.height + 'px',
+						width:imgElement.width,
+						height:imgElement.height,
+						overflow: "visible",
+					});
+					
+					copy_style(wrap, img, false, options.wrapClass);
+					img.before(wrap).css('opacity', 0).css(canvas_style).remove();
+					if(has_VML) { img.css('filter', 'Alpha(opacity=0)'); }
+					wrap.append(img);				
+				} else if(!options.ccsPointerEvents) {
+					var img2 = img.clone();
+					img2.css('opacity', 0).addClass('maphilightcanvas').zIndex(img.zIndex() + 2);
+					if(has_VML) { img2.css('filter', 'Alpha(opacity=0)'); }
+					img.before(img2);
+				}
+				copy_style(canvas, img, !options.useWrapper, options.wrapClass);
+
+				mouseover = function(e) {
+					var shape, area_options, context;
+					area_options = options_from_area(this, options);
+					if(
+							!area_options.neverOn
+							&&
+							!area_options.alwaysOn
+					) {
+						shape = shape_from_area(this);
+						context = add_shape_to(canvas, shape[0], shape[1], area_options, "highlighted");
+						if (options.callback) {
+							options.callback(this, shape, context);
+						}
+						if(area_options.groupBy) {
+							// accept either a string or an array so that multiple attributes can be used
+							(typeof area_options.groupBy == 'string') && (area_options.groupBy = [area_options.groupBy]);
+							var el = $(this); // avoid scoping problem
 							$.each(area_options.groupBy, function(index,groupitem){
 								var areas;
 								// two ways groupBy might work; attribute and selector
@@ -304,50 +354,63 @@
 									}
 								});
 							});
-					}
-					// workaround for IE7, IE8 not rendering the final rectangle in a group
-					if(!has_canvas) {
-						$(canvas).append('<v:rect></v:rect>');
+						}
+						// workaround for IE7, IE8 not rendering the final rectangle in a group
+						if(!has_canvas) {
+							$(canvas).append('<v:rect></v:rect>');
+						}
 					}
 				}
-			}
 
-			$(map).bind('alwaysOn.maphilight', function() {
-				// Check for areas with alwaysOn set. These are added to a *second* canvas,
-				// which will get around flickering during fading.
-				if(canvas_always) {
-					clear_canvas(canvas_always);
-				}
-				if(!has_canvas) {
-					$(canvas).empty();
-				}
-				$(map).find('area[coords]').each(function() {
-					var shape, area_options;
-					area_options = options_from_area(this, options);
-					if(area_options.alwaysOn) {
-						if(!canvas_always && has_canvas) {
-							canvas_always = create_canvas_for(img[0]);
-							$(canvas_always).css(canvas_style);
-							img.before(canvas_always);
-						}
-						area_options.fade = area_options.alwaysOnFade; // alwaysOn shouldn't fade in initially
-						shape = shape_from_area(this);
-						if (has_canvas) {
-							add_shape_to(canvas_always, shape[0], shape[1], area_options, "");
-						} else {
-							add_shape_to(canvas, shape[0], shape[1], area_options, "");
-						}
+				$(map).on('alwaysOn.maphilight', function() {
+					// Check for areas with alwaysOn set. These are added to a *second* canvas,
+					// which will get around flickering during fading.
+					if(canvas_always) {
+						clear_canvas(canvas_always);
 					}
+					if(!has_canvas) {
+						$(canvas).empty();
+					}
+					$(map).find('area[coords]').each(function() {
+						var shape, area_options;
+						area_options = options_from_area(this, options);
+						if(area_options.alwaysOn) {
+							if(!canvas_always && has_canvas) {
+								canvas_always = create_canvas_for(imgElement);
+								$(canvas_always).css(canvas_style);
+								copy_style(canvas_always, img, !options.useWrapper, options.wrapClass);
+								img.before(canvas_always);
+							}
+							for (var key in area_options) {
+								if(key.substr && key.length >= 10 && key.substr(0,8) == "alwaysOn") {
+									area_options[key[8].toLowerCase() + key.substr(9)] = area_options[key]
+								}
+							}
+							shape = shape_from_area(this);
+							if (has_canvas) {
+								add_shape_to(canvas_always, shape[0], shape[1], area_options, "");
+							} else {
+								add_shape_to(canvas, shape[0], shape[1], area_options, "");
+							}
+						}
+					});
 				});
-			});
-			
-			$(map).trigger('alwaysOn.maphilight').find('area[coords]')
-				.bind('mouseover.maphilight', mouseover)
-				.bind('mouseout.maphilight', function(e) { clear_canvas(canvas); });
-			
-			img.before(canvas); // if we put this after, the mouseover events wouldn't fire.
-			
-			img.addClass('maphilighted');
+
+				if(options.removeHilightEvent) {
+					$(map).on(options.removeHilightEvent + '.maphilight', remove_canvas);
+				}
+
+				$(map).trigger('alwaysOn.maphilight').find('area[coords]')
+				.on('mouseover.maphilight', mouseover)
+				.on('mouseout.maphilight', function(e) { clear_canvas(canvas); });
+				img.before(canvas); // if we put this after, the mouseover events wouldn't fire.
+				img.addClass('maphilighted');
+			};
+			if(options.setupHilightEvent) {
+				$(map).on(options.setupHilightEvent + '.maphilight', setup_canvas);
+			} else {
+				setup_canvas();
+			}
 		});
 	};
 	$.fn.maphilight.defaults = {
@@ -371,6 +434,25 @@
 		shadowColor: '000000',
 		shadowOpacity: 0.8,
 		shadowPosition: 'outside',
-		shadowFrom: false
+		shadowFrom: false,
+		useWrapper: true,
+		ccsPointerEvents: function(){
+			if(navigator.appName == 'Microsoft Internet Explorer')
+			{
+				var agent = navigator.userAgent;
+				if (agent.match(/MSIE ([0-9]{1,}[\.0-9]{0,})/) != null){
+					var version = parseFloat( RegExp.$1 );
+					if(version < 11)
+						return false;
+				}
+			}
+			return true;
+		}(),
+		setupHilightEvent: false,
+		removeHilightEvent: false,
 	};
+	if ('rwdImageMaps' in $.fn) {
+		$.fn.maphilight.defaults.setupHilightEvent = 'rwdImageMaps_changed';
+		$.fn.maphilight.defaults.removeHilightEvent = 'rwdImageMaps_invalid';
+	}
 })(jQuery);
