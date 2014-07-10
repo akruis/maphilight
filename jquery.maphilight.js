@@ -26,7 +26,9 @@
 			return 'rgba('+hex_to_decimal(color.substr(0,2))+','+hex_to_decimal(color.substr(2,2))+','+hex_to_decimal(color.substr(4,2))+','+opacity+')';
 		};
 		create_canvas_for = function(img) {
-			var c = $('<canvas style="width:'+img.width+'px;height:'+img.height+'px;"></canvas>').get(0);
+			var c = $('<canvas style="width:'+(img.width-1)+'px;height:'+(img.height-1)+'px;"></canvas>').get(0);
+			c.height = img.height-1;
+			c.width = img.width-1;
 			c.getContext("2d").clearRect(0, 0, c.width, c.height);
 			return c;
 		};
@@ -138,7 +140,7 @@
 		};
 	} else {   // ie executes this code
 		create_canvas_for = function(img) {
-			return $('<var style="zoom:1;overflow:hidden;display:block;width:'+img.width+'px;height:'+img.height+'px;"></var>').get(0);
+			return $('<var style="zoom:1;overflow:hidden;display:block;width:'+(img.width-1)+'px;height:'+(img.height-1)+'px;"></var>').get(0);
 		};
 		add_shape_to = function(canvas, shape, coords, options, name) {
 			var fill, stroke, opacity, e;
@@ -265,8 +267,6 @@
 			
 			canvas = create_canvas_for(this);
 			$(canvas).css(canvas_style);
-			canvas.height = this.height;
-			canvas.width = this.width;
 			
 			mouseover = function(e) {
 				var shape, area_options, context;
@@ -328,8 +328,6 @@
 						if(!canvas_always && has_canvas) {
 							canvas_always = create_canvas_for(img[0]);
 							$(canvas_always).css(canvas_style);
-							canvas_always.width = img[0].width;
-							canvas_always.height = img[0].height;
 							img.before(canvas_always);
 						}
 						area_options.fade = area_options.alwaysOnFade; // alwaysOn shouldn't fade in initially
